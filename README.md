@@ -22,4 +22,8 @@ Use `dist/` como raiz do seu domínio em uma hospedagem estática que sirva `ind
 
 A produção na Vercel usa `vercel.json` e o comando `node scripts/publicar.mjs`. O diretório gerado é `public/`. A compilação prepara URLs canônicas, o mapa das quatro páginas e os dados estruturados a partir do domínio de produção. Ao mudar de domínio, defina `SITE_URL`. Para servir os mesmos arquivos em um subdiretório, configure `SITE_BASE_PATH`, por exemplo `/portfolio-kaue-lima/`. Os links canônicos apontam para a versão principal na Vercel.
 
-O mapa para o Google Search Console está em [sitemap.xml](https://portfolio-kaue-lima.vercel.app/sitemap.xml).
+O endereço principal é [kaueink.vercel.app](https://kaueink.vercel.app/). O endereço anterior redireciona para a mesma página no domínio principal.
+
+A navegação usa documentos HTML independentes e o histórico nativo do navegador. As animações usam GSAP e ScrollTrigger 3.12.5, Lenis 1.1.13 e o renderizador WebGL 2 da referência. A sequência de 341 imagens carrega os quadros próximos à posição de rolagem. O build atribui nomes com hash aos scripts e estilos de entrada para reaproveitar o cache entre páginas.
+
+O mapa para o Google Search Console está em [sitemap.xml](https://kaueink.vercel.app/sitemap.xml).

@@ -12,7 +12,7 @@
 
 @font-face {
   font-family: 'Breton';
-  src: url('../assets/fonts/Breton.woff2') format('opentype');
+  src: url('../assets/fonts/Breton.woff2') format('woff2');
   font-weight: normal;
   font-style: normal;
   font-display: block;
@@ -1915,7 +1915,7 @@ a.chr-hover {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    transition: none !important;
     scroll-behavior: auto !important;
   }
 }
@@ -2011,4 +2011,12 @@ a.chr-hover {
 
 .awards-title {
   font-size: clamp(2rem, 3vw, 2.4rem) !important;
+}
+
+@media (max-width: 768px) {
+  .hero-bar-right a, .skills-contact, .about-btn a, .footer-top-col a {
+    min-height: 44px;
+    align-items: center;
+  }
+  .hero-bar-right .ch-top, .hero-bar-right .ch-bot { line-height: 1.25; }
 }

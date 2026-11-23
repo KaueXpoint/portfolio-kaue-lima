@@ -1,12 +1,12 @@
-import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const source = path.join(root, 'dist');
 const output = path.join(root, 'public');
-const deploymentHost = process.env.VERCEL_PROJECT_PRODUCTION_URL;
-const rawOrigin = process.env.SITE_URL || (deploymentHost && 'https://' + deploymentHost) || 'https://portfolio-kaue-lima.vercel.app';
+const rawOrigin = process.env.SITE_URL || 'https://kaueink.vercel.app';
 const basePath = process.env.SITE_BASE_PATH || '/';
 if (!/^\/(?:[a-zA-Z0-9_-]+\/)*$/.test(basePath)) throw new Error('SITE_BASE_PATH inválido.');
 const origin = new URL(rawOrigin);
@@ -17,8 +17,28 @@ const preview = process.env.VERCEL_ENV === 'preview';
 const pages = [['', 'WebPage'], ['works/', 'CollectionPage'], ['info/', 'ProfilePage'], ['contact/', 'ContactPage']];
 const url = route => new URL(route, origin).href;
 const xml = text => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
-await mkdir(output, {recursive: true});
+// Only the output directory is generated. Source assets always live in dist/.
+await rm(output, {recursive: true, force: true});
 await cp(source, output, {recursive: true});
+
+const versionedDirectory = path.join(output, 'static');
+await mkdir(versionedDirectory, {recursive: true});
+const assetUrls = new Map();
+
+async function versionPageAssets(html) {
+  const localAssets = /\b(?:href|src)="((?:js\/|styles\/)[^"?]*?\.(?:js|css)|portfolio\.js)(?:\?[^"]*)?"/g;
+  const matches = [...html.matchAll(localAssets)];
+  for (const [, file] of matches) {
+    if (assetUrls.has(file)) continue;
+    const bytes = await readFile(path.join(source, file));
+    const hash = createHash('sha256').update(bytes).digest('hex').slice(0, 16);
+    const name = hash + '-' + path.basename(file);
+    await writeFile(path.join(versionedDirectory, name), bytes);
+    assetUrls.set(file, 'static/' + name);
+  }
+  return html.replace(localAssets, (attribute, file) =>
+    attribute.slice(0, attribute.indexOf('"') + 1) + assetUrls.get(file) + '"');
+}
 
 for (const [route, type] of pages) {
   const filename = path.join(output, route, 'index.html');
@@ -46,7 +66,7 @@ for (const [route, type] of pages) {
     '<!-- production-metadata -->\n  ' + meta.join('\n  ') + '\n  <!-- end-metadata -->');
   html = html.replace('<base href="/">', '<base href="' + basePath + '">');
   if (preview) html = html.replace('index,follow,max-image-preview:large','noindex,follow');
-  await writeFile(filename, html);
+  await writeFile(filename, await versionPageAssets(html));
 }
 const locs = pages.map(([route]) => '  <url><loc>' + xml(url(route)) + '</loc></url>');
 await writeFile(path.join(output, 'sitemap.xml'),

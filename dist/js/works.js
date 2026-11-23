@@ -25,6 +25,7 @@
       }
       setCubeAngle(displayAngle);
       layoutRulers();
+      requestRender();
     }
 
     function setCubeAngle(deg) {
@@ -223,12 +224,17 @@
     var snapTween = null;
     var snapProxy = { a: 0 };
     var introTl = null;
-    var lastRenderTimestamp = 0;
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let renderFrame = 0;
+    function requestRender() {
+      if (!renderFrame) renderFrame = requestAnimationFrame(render);
+    }
 
     function snapToNearest() {
       var nearest = Math.round(rawAngle / 90) * 90;
-      if (Math.abs(rawAngle - nearest) < 0.5) {
+      if (reduceMotion || Math.abs(rawAngle - nearest) < 0.5) {
         rawAngle = nearest;
+        requestRender();
         return;
       }
       isSnapping = true;
@@ -237,7 +243,7 @@
         a: nearest,
         duration: 0.5,
         ease: 'power3.out',
-        onUpdate: function() { rawAngle = snapProxy.a; },
+        onUpdate: function() { rawAngle = snapProxy.a; requestRender(); },
         onComplete: function() { rawAngle = nearest; isSnapping = false; }
       });
     }
@@ -258,6 +264,7 @@
         if (projectDirectory?.contains(event.target)) return;
         if (projectDirectory?.showPopover && projectDirectory.matches(':popover-open')) return;
         handler(event);
+        if (rawAngle !== displayAngle) requestRender();
       }, options);
     }
 
@@ -330,14 +337,9 @@
 
 
     
-    function render(timestamp) {
-      
-      if (lastRenderTimestamp > 0 && timestamp - lastRenderTimestamp > 500) {
-        displayAngle = rawAngle;
-      }
-      lastRenderTimestamp = timestamp;
-
-      var lerp = isSnapping ? 0.07 : 0.035;
+    function render() {
+      renderFrame = 0;
+      var lerp = reduceMotion ? 1 : isSnapping ? 0.07 : 0.035;
       displayAngle += (rawAngle - displayAngle) * lerp;
 
       
@@ -355,7 +357,7 @@
       updateRulers(displayAngle);
       updateCounter(displayAngle);
 
-      requestAnimationFrame(render);
+      if (displayAngle !== rawAngle) requestRender();
     }
 
 
@@ -380,72 +382,21 @@
 
 
     
-    var fromIndexTransition = sessionStorage.getItem('work-transition') === '1';
-    var backBtnEl = document.getElementById('back-btn');
-    var isLeavingWithFade = false;
+    const fromIndexTransition = setupHomeLink('work');
+    const galleryNavigation = document.querySelectorAll('#back-btn, #project-visit, .directory-trigger, .page-nav > a');
+    gsap.set(galleryNavigation, { autoAlpha: 0 });
 
-    function isOnBackTrapState() {
-      return !!(window.history.state && window.history.state.__workBackTrap);
-    }
-
-    function ensureBackTrapState() {
-      if (!fromIndexTransition) return;
-      if (isOnBackTrapState()) return;
-      if (!(window.history && window.history.pushState)) return;
-      window.history.pushState({ __workBackTrap: true }, '', window.location.href);
-    }
-
-    ensureBackTrapState();
-
-    function returnToIndexWithFade(historySteps) {
-      if (isLeavingWithFade) return;
-      isLeavingWithFade = true;
-
-      var overlay = document.getElementById('intro-overlay');
-      var title = document.getElementById('page-title');
-      gsap.killTweensOf([overlay, title]);
-      overlay.style.pointerEvents = 'auto';
-
-      var tl = gsap.timeline({
-        onComplete: function() {
-          sessionStorage.setItem('index-return-fade', 'works');
-          if (historySteps > 0 && window.history.length > historySteps) {
-            window.history.go(-historySteps);
-            return;
-          }
-          window.location.href = document.baseURI;
-        }
-      });
-
-      tl.to(title, { opacity: 0, duration: 0.4, ease: 'power2.inOut' }, 0);
-      tl.to(overlay, { opacity: 1, duration: 0.5, ease: 'power2.inOut' }, 0.1);
-    }
-
-    backBtnEl.addEventListener('click', function(e) {
-      e.preventDefault();
-      var steps = fromIndexTransition ? (isOnBackTrapState() ? 2 : 1) : 0;
-      returnToIndexWithFade(steps);
-    });
-
-    window.addEventListener('popstate', function() {
-      if (!fromIndexTransition || isLeavingWithFade) return;
-      returnToIndexWithFade(1);
-    });
-
-
-    
     function playIntro() {
       var overlay = document.getElementById('intro-overlay');
       var title = document.getElementById('page-title');
       var viewport = document.getElementById('cube-viewport');
-      var backBtn = document.getElementById('back-btn');
       var rl = document.getElementById('ruler-left');
       var rr = document.getElementById('ruler-right');
       var cw = document.getElementById('counter-wrap');
       var hint = document.getElementById('scroll-hint');
 
       var fromIndex = fromIndexTransition;
-      sessionStorage.removeItem('work-transition');
+
 
       var tl = gsap.timeline();
       introTl = tl;
@@ -463,7 +414,7 @@
 
       var t0 = fromIndex ? 0.6 : 0.4;
       tl.to(viewport, { opacity: 1, duration: 1, ease: 'power2.out' }, t0);
-      tl.to(backBtn, { opacity: 1, duration: 0.6, ease: 'power2.out' }, t0 + 0.2);
+      tl.to(galleryNavigation, { autoAlpha: 1, duration: 0.6, ease: 'power2.out' }, t0 + 0.2);
       tl.to([rl, rr], { opacity: 1, duration: 0.8, ease: 'power2.out' }, t0 + 0.3);
       tl.to(cw, { opacity: 1, duration: 0.6, ease: 'power2.out' }, t0 + 0.4);
       tl.set(hint, { display: 'none' });
@@ -471,10 +422,11 @@
       
       var chevron = document.getElementById('scroll-chevron');
       tl.to(chevron, { opacity: 1, duration: 0.6, ease: 'power2.out' }, t0 + 0.5);
-      gsap.to(chevron, {
+      if (!reduceMotion) gsap.to(chevron, {
         y: 6, duration: 0.9, ease: 'power1.inOut', repeat: -1, yoyo: true, delay: t0 + 0.5
       });
       tl.to(chevron, { opacity: 0, duration: 0.8, ease: 'power2.in' }, t0 + 5);
+      if (reduceMotion) tl.progress(1);
     }
 
 
@@ -482,7 +434,7 @@
     buildCounter();
     measureCube();
     syncFaces(0);
-    requestAnimationFrame(render);
+    requestRender();
 
     window.addEventListener('resize', measureCube);
 
@@ -493,8 +445,7 @@
     }
 
     window.addEventListener('pageshow', function(e) {
-      isLeavingWithFade = false;
-      ensureBackTrapState();
+
       if (!e.persisted) return;
       var overlay = document.getElementById('intro-overlay');
       gsap.killTweensOf(overlay);
@@ -507,4 +458,5 @@
       if (document.hidden) return;
       if (introTl && introTl.progress() < 1) introTl.progress(1);
       displayAngle = rawAngle;
+      requestRender();
     });

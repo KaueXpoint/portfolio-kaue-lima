@@ -1,6 +1,7 @@
 
 
-const shouldSkipLongIntro = !!sessionStorage.getItem('index-return-fade');
+const returningThroughHistory = performance.getEntriesByType('navigation')[0]?.type === 'back_forward';
+const shouldSkipLongIntro = returningThroughHistory || !!sessionStorage.getItem('index-return-fade');
 const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const mustSkip = shouldSkipLongIntro || prefersReducedMotion;
@@ -62,32 +63,13 @@ function startShader() {
   if (_shaderStarted || prefersReducedMotion) return;
   _shaderStarted = true;
 
-  const projectData = window._heroProjectData;
-  if (!projectData) {
-    console.error('Hero project data not found!');
-    return;
-  }
-
-  const blob = new Blob([JSON.stringify(projectData)], { type: 'application/json' });
-  const blobUrl = URL.createObjectURL(blob);
-  const container = document.getElementById('hero-canvas');
-  
-  if (container) {
-    container.setAttribute('data-cr-project-src', blobUrl);
-    CoreRenderer.init().then(() => {
-      URL.revokeObjectURL(blobUrl);
-      
-      const e = new MouseEvent('mousemove', {
-        clientX: lastMouseX,
-        clientY: lastMouseY,
-        bubbles: true
-      });
-      window.dispatchEvent(e);
-      window.dispatchEvent(new Event('scroll'));
-    }).catch(err => {
-      console.error('CoreRenderer init failed:', err);
-    });
-  }
+  import(new URL('js/shader.mjs', document.baseURI).href).then(({ startScene }) => startScene('hero-canvas')).then(scene => {
+    if (!scene) return;
+    window.dispatchEvent(new MouseEvent('mousemove', {
+      clientX: lastMouseX, clientY: lastMouseY, bubbles: true
+    }));
+    window.dispatchEvent(new Event('scroll'));
+  }).catch(err => console.error('CoreRenderer init failed:', err));
 }
 
 gsap.registerPlugin(ScrollTrigger);
@@ -426,7 +408,12 @@ master.add(() => {
   requestAnimationFrame(() => {
     if (revealSetupStarted) return;
     revealSetupStarted = true;
-    setupScrollReveal().catch(err => {
+    setupScrollReveal().then(() => {
+      if (returningThroughHistory && Number.isFinite(history.state?.homeScroll)) {
+        ScrollTrigger.refresh();
+        lenis.scrollTo(history.state.homeScroll, { immediate: true });
+      }
+    }).catch(err => {
       console.error('setupScrollReveal failed:', err);
     });
   });
@@ -470,129 +457,113 @@ async function setupScrollReveal() {
   gsap.set(phraseChars, isMobile ? { opacity: 0 } : { opacity: 0, filter: 'blur(10px)' });
 
   
-  const FRAME_DIR = 'assets/images/hero%20sequence/';
-  const FRAME_EXT = '.jpg';
-  const FRAME_PAD = 4;
-  const TOTAL_FRAMES = prefersReducedMotion ? 1 : 341;
-  const FRAME_CACHE_KEY = '20260416-r2'; 
-  const frameUrl = n => `${FRAME_DIR}${String(n).padStart(FRAME_PAD, '0')}${FRAME_EXT}?v=${FRAME_CACHE_KEY}`;
-
-  const frames = new Array(TOTAL_FRAMES);
-  let loadedFrameIdx = [];
-  let totalFrames = 0;
-  let drawnIdx = -1;
-
-  function rebuildLoadedFrameIndex() {
-    loadedFrameIdx = [];
-    for (let i = 0; i < frames.length; i++) {
-      if (frames[i] && frames[i].naturalWidth) loadedFrameIdx.push(i);
-    }
-    totalFrames = loadedFrameIdx.length;
-  }
-
-  
+  const frameCount = prefersReducedMotion ? 1 : 341;
+  const cache = new Map();
+  const pending = new Set();
+  const retryAfter = new Map();
+  const concurrent = isSlowHardware ? 2 : 4;
+  const lookAhead = isSlowHardware ? 6 : 10;
+  const cacheLimit = isSlowHardware ? 18 : 28;
+  let desired = 0;
+  let direction = 1;
+  let priorities = [0];
+  let warmed = false;
+  let drawn = -1;
+  let paintRaf = 0;
+  let lastDraw = -Infinity;
   canvas.style.willChange = 'transform';
 
+  function schedulePaint() {
+    if (!paintRaf) paintRaf = requestAnimationFrame(paintNearest);
+  }
+
+  function paintNearest(now) {
+    paintRaf = 0;
+    let nearest = -1;
+    for (const index of cache.keys()) {
+      if (nearest === -1 || Math.abs(index - desired) < Math.abs(nearest - desired)) nearest = index;
+    }
+    if (nearest < 0 || nearest === drawn) return;
+    if (isSlowHardware && now - lastDraw < 32) {
+      schedulePaint();
+      return;
+    }
+    const img = cache.get(nearest);
+    const scale = Math.max(canvas.width / img.naturalWidth, canvas.height / img.naturalHeight);
+    const width = img.naturalWidth * scale, height = img.naturalHeight * scale;
+    ctx.drawImage(img, (canvas.width - width) / 2, (canvas.height - height) / 2, width, height);
+    drawn = nearest;
+    lastDraw = now;
+  }
+
   function resizeCanvas() {
-    
     const dpr = isSlowHardware ? 1 : Math.min(window.devicePixelRatio || 1, 1.5);
     canvas.width = Math.round(window.innerWidth * dpr);
     canvas.height = Math.round(window.innerHeight * dpr);
-    if (drawnIdx >= 0) { const i = drawnIdx; drawnIdx = -1; drawFrame(i); }
+    drawn = -1;
+    schedulePaint();
   }
-  let _lastDrawMs = 0;
-  function drawFrame(i) {
-    if (i === drawnIdx) return;
-    
-    if (isSlowHardware) {
-      const now = performance.now();
-      if (now - _lastDrawMs < 32) return;
-      _lastDrawMs = now;
+
+  function trimCache() {
+    if (cache.size <= cacheLimit) return;
+    let farthest = -1;
+    for (const index of cache.keys()) {
+      if (index === 0 || index === drawn) continue;
+      if (farthest === -1 || Math.abs(index - desired) > Math.abs(farthest - desired)) farthest = index;
     }
-    if (i < 0 || i >= frames.length) return;
-    const img = frames[i];
-    if (!(img && img.naturalWidth)) return;
-    const cw = canvas.width, ch = canvas.height;
-    const iw = img.naturalWidth, ih = img.naturalHeight;
-    const s = Math.max(cw / iw, ch / ih);
-    const dw = iw * s, dh = ih * s;
-    ctx.clearRect(0, 0, cw, ch);
-    ctx.drawImage(img, (cw - dw) * 0.5, (ch - dh) * 0.5, dw, dh);
-    drawnIdx = i;
+    if (farthest >= 0) cache.delete(farthest);
   }
-  function probe(n) {
-    return new Promise(resolve => {
+
+  function pumpFrames() {
+    for (const index of priorities) {
+      if (pending.size === concurrent) break;
+      if (cache.has(index) || pending.has(index) || (retryAfter.get(index) || 0) > Date.now()) continue;
+      pending.add(index);
       const img = new Image();
       img.decoding = 'async';
-      img.onload = () => resolve(img);
-      img.onerror = () => resolve(null);
-      img.src = frameUrl(n);
-    });
-  }
-  async function probeWithRetry(n, attempts = 3) {
-    for (let k = 0; k < attempts; k++) {
-      const img = await probe(n);
-      if (img) return img;
+      img.fetchPriority = index === desired ? 'high' : 'low';
+      img.onload = () => {
+        pending.delete(index);
+        retryAfter.delete(index);
+        cache.set(index, img);
+        trimCache();
+        schedulePaint();
+        pumpFrames();
+      };
+      img.onerror = () => {
+        pending.delete(index);
+        // Retry a visible missing frame without blocking the rest of the timeline.
+        const delay = retryAfter.has(index) ? 30000 : 2000;
+        retryAfter.set(index, Date.now() + delay);
+        if (index === desired) setTimeout(() => { if (desired === index) pumpFrames(); }, delay + 1);
+        pumpFrames();
+      };
+      img.src = 'assets/images/hero%20sequence/' + String(index + 1).padStart(4, '0') + '.jpg?v=20260416-r2';
     }
-    return null;
-  }
-  async function loadFirstBatch() {
-    const first = await probeWithRetry(1, 3);
-    if (!first) { console.error('Frame 1 failed to load!'); return 0; }
-    frames[0] = first;
-    rebuildLoadedFrameIndex();
-    resizeCanvas();
-    drawFrame(0);
-
-    const SPEED_BATCH = 10;
-    const t0 = performance.now();
-    const batchNums = Array.from({ length: Math.min(SPEED_BATCH, TOTAL_FRAMES - 1) }, (_, k) => k + 2);
-    await Promise.all(batchNums.map(async n => {
-      const img = await probeWithRetry(n, 2);
-      if (img) frames[n - 1] = img;
-    }));
-    const elapsed = performance.now() - t0;
-    rebuildLoadedFrameIndex();
-    return elapsed > 4000 ? 3 : elapsed > 2000 ? 2 : 1;
   }
 
-  async function loadRemainingFrames(skip) {
-    const BATCH_END = 11;
-    const toLoad = [];
-    for (let i = BATCH_END + 1; i <= TOTAL_FRAMES; i++) {
-      if (skip <= 1 || i % skip === 0) toLoad.push(i);
-    }
-    let cursor = 0;
-    const failed = [];
-    
-    
-    const CONCURRENCY = isSlowHardware ? 2 : 6;
-    const worker = async () => {
-      while (cursor < toLoad.length) {
-        const n = toLoad[cursor++];
-        if (frames[n - 1]?.naturalWidth) continue;
-        const img = await probeWithRetry(n, 2);
-        if (img) { frames[n - 1] = img; rebuildLoadedFrameIndex(); }
-        else failed.push(n);
+  function drawFrameAtProgress(progress, warm = progress > 0) {
+    const target = Math.round(Math.max(0, Math.min(1, progress)) * (frameCount - 1));
+    if (target === desired && warmed === warm) return;
+    if (target !== desired) direction = Math.sign(target - desired);
+    desired = target;
+    warmed = warm;
+    priorities = [desired];
+    if (warm) {
+      for (let offset = 1; offset <= lookAhead; offset++) {
+        const ahead = desired + offset * direction;
+        const behind = desired - offset * direction;
+        if (ahead >= 0 && ahead < frameCount) priorities.push(ahead);
+        if (offset <= 3 && behind >= 0 && behind < frameCount) priorities.push(behind);
       }
-    };
-    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
-    for (const n of [...failed]) {
-      const img = await probeWithRetry(n, 2);
-      if (img) { frames[n - 1] = img; rebuildLoadedFrameIndex(); }
     }
+    schedulePaint();
+    pumpFrames();
   }
 
   window.addEventListener('resize', resizeCanvas);
-  let frameSkip = await loadFirstBatch();
-  if (isMobile) frameSkip = Math.max(frameSkip, 3);
-
-  if (totalFrames === 0) {
-    console.error('No reveal frames loaded.');
-    return;
-  }
-
-  loadRemainingFrames(frameSkip).catch(err => console.error('Frame background load error:', err));
+  resizeCanvas();
+  pumpFrames();
 
   const introSettledY = Number(gsap.getProperty(pContent, 'y')) || 0;
   
@@ -637,15 +608,6 @@ async function setupScrollReveal() {
   const REVEAL_PHASE_DURATION = 0.7;
   const FRAME_PROGRESS_AT_EXIT_START = 0.82;
 
-  function drawFrameAtProgress(progress) {
-    if (totalFrames === 0) return;
-    const clamped = Math.min(1, Math.max(0, progress));
-    const loadedPos = Math.round(clamped * (totalFrames - 1));
-    const sourceIdx = loadedFrameIdx[loadedPos];
-    if (sourceIdx == null) return;
-    drawFrame(sourceIdx);
-  }
-
   ScrollTrigger.create({
     trigger: '#scroll-wrap',
     start: 'top top',
@@ -659,7 +621,7 @@ async function setupScrollReveal() {
         stopIntroNameAnchor();
       }
       if (p < REVEAL_PHASE_START) {
-        drawFrameAtProgress(0);
+        drawFrameAtProgress(0, p > 0.18);
         return;
       }
       const phase2 = Math.min(1, Math.max(0, (p - REVEAL_PHASE_START) / REVEAL_PHASE_DURATION));
@@ -815,15 +777,6 @@ function setupProjectsSection() {
   const preview = document.getElementById('proj-preview');
   let currentIdx = -1;
   gsap.set(card, { opacity: 0 });
-
-  
-  const _coverCache = [];
-  items.forEach(item => {
-    const img = new Image();
-    img.src = item.dataset.img;
-    if (img.decode) img.decode().catch(() => { });
-    _coverCache.push(img);
-  });
 
   
   const projectsEl = document.getElementById('projects');
@@ -1653,8 +1606,22 @@ function setupProjectsSection() {
       img.src = src;
     }
 
-    loadAndRender('assets/images/footer/left.png', 'ascii-left', 80);
-    loadAndRender('assets/images/footer/right.png', 'ascii-right', 80);
+    const footer = document.getElementById('footer');
+    const loadFooterArt = () => {
+      loadAndRender('assets/images/footer/left.png', 'ascii-left', 80);
+      loadAndRender('assets/images/footer/right.png', 'ascii-right', 80);
+    };
+    if ('IntersectionObserver' in window && footer) {
+      const observer = new IntersectionObserver(entries => {
+        if (entries.some(entry => entry.isIntersecting)) {
+          observer.disconnect();
+          loadFooterArt();
+        }
+      }, { rootMargin: '100% 0px' });
+      observer.observe(footer);
+    } else {
+      loadFooterArt();
+    }
 
     
     var asciiLeftWrap = document.querySelector('.footer-ascii.left');
@@ -2189,36 +2156,7 @@ function setupProjectsSection() {
   syncProjectFromLocation();
 
   
-  function preloadProjectImages() {
-    var allSrcs = [];
-    
-    items.forEach(function (item) { if (item.dataset.img) allSrcs.push(item.dataset.img); });
-    
-    Object.keys(PROJECTS).forEach(function (id) {
-      var imgs = PROJECTS[id].images || [];
-      if (imgs) allSrcs = allSrcs.concat(imgs);
-    });
-    
-    var seen = {};
-    allSrcs = allSrcs.filter(function (s) { if (seen[s]) return false; seen[s] = true; return true; });
-    
-    var idx = 0, batch = 2;
-    function loadBatch() {
-      for (var j = 0; j < batch && idx < allSrcs.length; j++, idx++) {
-        var img = new Image();
-        img.decoding = 'async';
-        img.src = allSrcs[idx];
-      }
-      if (idx < allSrcs.length) {
-        if (window.requestIdleCallback) requestIdleCallback(loadBatch);
-        else setTimeout(loadBatch, 200);
-      }
-    }
-    if (window.requestIdleCallback) requestIdleCallback(loadBatch);
-    else setTimeout(loadBatch, 2000);
-  }
-  
-  setTimeout(preloadProjectImages, 4000);
+
 }
 
 ScrollTrigger.refresh();
@@ -2279,9 +2217,10 @@ function handleIndexPageShow(e) {
   if (isBfcacheRestore) {
     
     
-    _forceScrollTop();
-    if (lenis) lenis.scrollTo(0, { immediate: true });
     ScrollTrigger.refresh();
+    if (Number.isFinite(history.state?.homeScroll)) {
+      lenis.scrollTo(history.state.homeScroll, { immediate: true });
+    }
   }
 
   if (hasReturnFlag || isBfcacheRestore) {
@@ -2307,6 +2246,19 @@ function runPageTransition(linkEl, label, sessionKey, href) {
   if (!overlay || !flyText) return;
 
   _isPageTransitioning = true;
+  history.replaceState({ ...history.state, homeScroll: window.scrollY }, '');
+
+  if (prefersReducedMotion) {
+    sessionStorage.setItem(sessionKey, '1');
+    window.location.assign(linkEl.href);
+    return;
+  }
+
+  // Fetch the next document while the original 1.3 s title transition plays.
+  const prefetch = document.createElement('link');
+  prefetch.rel = 'prefetch';
+  prefetch.href = linkEl.href;
+  document.head.append(prefetch);
 
   
   linkEl.style.visibility = 'hidden';
@@ -2327,16 +2279,19 @@ function runPageTransition(linkEl, label, sessionKey, href) {
     y: 0,
   });
 
+  const destination = document.querySelector('.title-destination');
+  const landing = destination.getBoundingClientRect();
   const tl = gsap.timeline();
 
   tl.to(overlay, { opacity: 1, duration: 0.7, ease: 'power2.inOut' }, 0);
 
   tl.to(flyText, {
-    left: '3rem',
-    top: '3rem',
+    left: landing.left,
+    top: landing.top,
+    lineHeight: 1,
     xPercent: 0,
     yPercent: 0,
-    fontSize: 'clamp(2.5rem, 5vw, 4.5rem)',
+    fontSize: getComputedStyle(destination).fontSize,
     duration: 1,
     ease: 'power3.inOut',
   }, 0.2);
