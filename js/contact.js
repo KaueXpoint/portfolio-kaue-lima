@@ -6,23 +6,10 @@ if (history.scrollRestoration) {
 window.scrollTo(0, 0);
 requestAnimationFrame(() => window.scrollTo(0, 0));
 
-(function () {
-  const projectData = window._heroProjectData;
-  if (!projectData || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-
-  const blob = new Blob([JSON.stringify(projectData)], { type: 'application/json' });
-  const blobUrl = URL.createObjectURL(blob);
-  const container = document.getElementById('contact-canvas');
-  
-  if (container) {
-    container.setAttribute('data-cr-project-src', blobUrl);
-    CoreRenderer.init().then(() => {
-      URL.revokeObjectURL(blobUrl);
-    }).catch(err => {
-      console.error('CoreRenderer init failed:', err);
-    });
-  }
-})();
+if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  import(new URL('js/shader.mjs', document.baseURI).href).then(({ startScene }) => startScene('contact-canvas'))
+    .catch(err => console.error('CoreRenderer init failed:', err));
+}
 
 document.querySelectorAll('[data-chr]').forEach(function (el) {
   const text = el.dataset.chr;
@@ -42,68 +29,19 @@ document.querySelectorAll('[data-chr]').forEach(function (el) {
   });
 });
 
-const fromIndexTransition = sessionStorage.getItem('contact-transition') === '1';
-const backBtnEl = document.getElementById('back-btn');
-let isLeavingWithFade = false;
+const fromIndexTransition = setupHomeLink('contact');
 let introTl = null;
-
-function isOnBackTrapState() {
-  return !!(window.history.state && window.history.state.__contactBackTrap);
-}
-
-function ensureBackTrapState() {
-  if (!fromIndexTransition) return;
-  if (isOnBackTrapState()) return;
-  if (!(window.history && window.history.pushState)) return;
-  window.history.pushState({ __contactBackTrap: true }, '', window.location.href);
-}
-
-ensureBackTrapState();
-
-function returnToIndexWithFade(historySteps) {
-  if (isLeavingWithFade) return;
-  isLeavingWithFade = true;
-
-  const overlay = document.getElementById('intro-overlay');
-  const title = document.getElementById('page-title');
-  gsap.killTweensOf([overlay, title]);
-  overlay.style.pointerEvents = 'auto';
-
-  const tl = gsap.timeline({
-    onComplete: function () {
-      sessionStorage.setItem('index-return-fade', 'contact');
-      if (historySteps > 0 && window.history.length > historySteps) {
-        window.history.go(-historySteps);
-        return;
-      }
-      window.location.href = document.baseURI;
-    }
-  });
-
-  tl.to(title, { opacity: 0, duration: 0.4, ease: 'power2.inOut' }, 0);
-  tl.to(overlay, { opacity: 1, duration: 0.5, ease: 'power2.inOut' }, 0.1);
-}
-
-backBtnEl.addEventListener('click', function (e) {
-  e.preventDefault();
-  const steps = fromIndexTransition ? (isOnBackTrapState() ? 2 : 1) : 0;
-  returnToIndexWithFade(steps);
-});
-
-window.addEventListener('popstate', function () {
-  if (!fromIndexTransition || isLeavingWithFade) return;
-  returnToIndexWithFade(1);
-});
 
 function playContactIntro() {
   const overlay = document.getElementById('intro-overlay');
   const title = document.getElementById('page-title');
-  const backBtn = document.getElementById('back-btn');
   const main = document.getElementById('contact-main');
   const bottom = document.getElementById('contact-bottom');
 
+  const pageNavigation = document.querySelectorAll('#back-btn, .page-nav > a');
+  gsap.set(pageNavigation, { autoAlpha: 0 });
   const fromIndex = fromIndexTransition;
-  sessionStorage.removeItem('contact-transition');
+
 
   const tl = gsap.timeline();
   introTl = tl;
@@ -121,9 +59,10 @@ function playContactIntro() {
 
   const t0 = fromIndex ? 0.5 : 0.35;
   tl.to(main, { opacity: 1, duration: 1.1, ease: 'power2.out' }, t0);
-  tl.to(backBtn, { opacity: 1, duration: 0.6, ease: 'power2.out' }, t0 + 0.2);
+  tl.to(pageNavigation, { autoAlpha: 1, duration: 0.6, ease: 'power2.out' }, t0 + 0.2);
   tl.to(bottom, { opacity: 1, duration: 0.7, ease: 'power2.out' }, t0 + 0.3);
   tl.add(function () { main.classList.add('ready'); }, t0 + 0.4);
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) tl.progress(1);
 }
 
 if (document.fonts && document.fonts.ready) {
@@ -133,8 +72,7 @@ if (document.fonts && document.fonts.ready) {
 }
 
 window.addEventListener('pageshow', function (e) {
-  isLeavingWithFade = false;
-  ensureBackTrapState();
+
   if (!e.persisted) return;
   const overlay = document.getElementById('intro-overlay');
   const title = document.getElementById('page-title');

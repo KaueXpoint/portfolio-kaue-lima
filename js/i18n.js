@@ -129,6 +129,8 @@
       item.setAttribute('aria-label', 'Ver ' + project.title);
       list.append(item);
       const img = create('img', 'cg-img');
+      img.loading = 'lazy';
+      img.decoding = 'async';
       img.src = project.cover;
       img.alt = project.title + (project.autor ? ' · ' + project.autor : '');
       img.width = 1200;
@@ -136,7 +138,6 @@
       gallery.append(img);
     });
     gallery.append(phrase);
-    if (featured.length) document.getElementById('proj-cover').src = featured[0].cover;
   }
 
   const skillGroups = document.getElementById('skills-right');

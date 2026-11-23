@@ -1,0 +1,19 @@
+/* The departure label and destination heading share a single landing point. */
+.page-header #page-title, .title-destination {
+  position: absolute;
+  left: clamp(1.25rem, 4vw, 3rem);
+  top: clamp(.75rem, 3.5vh, 3rem);
+  font-size: clamp(2.5rem, 5vw, 4.5rem);
+  line-height: 1;
+}
+.title-destination { position: fixed; visibility: hidden; pointer-events: none; }
+@media (max-width: 960px) {
+  .page-header #page-title, .title-destination {
+    left: clamp(1rem, 5vw, 2rem);
+    top: max(.875rem, env(safe-area-inset-top));
+    font-size: clamp(2rem, 6vw, 3rem);
+  }
+}
+@media (max-height: 520px) and (orientation: landscape) {
+  .page-header #page-title, .title-destination { top: .875rem; font-size: 2rem; }
+}

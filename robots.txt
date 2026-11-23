@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://portfolio-kaue-lima.vercel.app/sitemap.xml
+Sitemap: https://kaueink.vercel.app/sitemap.xml
