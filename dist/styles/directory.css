@@ -1,0 +1,16 @@
+.directory-trigger, #project-directory button {
+  border: 0; background: transparent; color: inherit; font: 600 .9rem/1.4 Inter, sans-serif;
+  text-decoration: underline; text-underline-offset: .25rem; cursor: pointer; padding: .55rem;
+}
+.directory-trigger { position: fixed; right: clamp(6rem, 10vw, 11rem); top: 1.5rem; z-index: 100; }
+#project-directory {
+  inset: 0; margin: auto; width: min(44rem, 92vw); max-height: 78dvh;
+  overflow: auto; overscroll-behavior: contain; padding: clamp(1.2rem, 4vw, 2.5rem);
+  background: #141414; color: #f6f6f6; border: 1px solid #555; font: 1rem/1.55 Inter, sans-serif;
+}
+#project-directory::backdrop { background: rgb(0 0 0 / .75); }
+#project-directory header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+#project-directory h3 { margin: 1.5rem 0 .5rem; }
+#project-directory ul { list-style: none; columns: 2 13rem; column-gap: 2rem; }
+#project-directory a { display: inline-block; padding: .3rem 0; color: inherit; text-underline-offset: .18em; }
+@media (max-width: 768px) { .directory-trigger { right: 5.75rem; top: 1.1rem; } }
