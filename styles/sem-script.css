@@ -1,0 +1,6 @@
+html, body { position: static; height: auto; min-height: 100%; overflow: auto; }
+body > :not(noscript) { display: none !important; }
+.texto-simples { max-width: 48rem; margin: auto; padding: 2rem 1.25rem; font: 1.05rem/1.65 Inter, sans-serif; }
+.texto-simples > * + * { margin-top: 1rem; }
+.texto-simples ul { padding-left: 1.5rem; }
+.texto-simples a { color: inherit; text-decoration: underline; }
