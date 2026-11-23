@@ -55,7 +55,12 @@ for (const [route, type] of pages) {
     {'@type': type, '@id': url(route + '#pagina'), url: url(route), name: title, inLanguage: 'pt-BR',
       isPartOf: {'@id': url('#website')}, ...(type === 'ProfilePage' ? {mainEntity: {'@id': person['@id']}} : {})}
   ];
+  // Some CDN caches can still serve HTML for the former production hostname.
+  const canonicalScript = JSON.stringify(url(route));
+  const legacyRedirect = '<script>if(location.hostname==="portfolio-kaue-lima.vercel.app")' +
+    '{location.replace(' + canonicalScript + '+location.search+location.hash)}</script>';
   const meta = [
+    ...(origin.hostname === 'kaueink.vercel.app' ? [legacyRedirect] : []),
     '<link rel="canonical" href="' + xml(url(route)) + '">',
     '<meta property="og:url" content="' + xml(url(route)) + '">',
     '<meta property="og:image" content="' + xml(image) + '">',
